@@ -1,4 +1,4 @@
-import { ExchangeError, type Candle, type Market, type PriceFeed } from './types.js';
+import { ExchangeError, type Book, type Candle, type Market, type MarketStats, type PriceFeed } from './types.js';
 
 const INFO_URL = 'https://api.hyperliquid.xyz/info';
 const INTERVAL_MS: Record<string, number> = {
@@ -6,14 +6,18 @@ const INTERVAL_MS: Record<string, number> = {
 };
 export const CANDLE_INTERVALS = Object.keys(INTERVAL_MS);
 
+interface HlCtx {
+  markPx: string; oraclePx: string; funding: string; premium?: string | null;
+  openInterest: string; dayNtlVlm: string; prevDayPx: string;
+}
+
 interface HlMeta {
   universe: { name: string; szDecimals: number; maxLeverage: number; isDelisted?: boolean }[];
 }
 
 /** Live prices from Hyperliquid's public info API. No key, no account. */
 export class HyperliquidFeed implements PriceFeed {
-  private marketCache: { at: number; value: Market[] } | null = null;
-  private midCache: { at: number; value: Record<string, number> } | null = null;
+  private ctxCache: { at: number; value: { markets: Market[]; stats: Record<string, MarketStats> } } | null = null;
 
   constructor(
     private readonly url = INFO_URL,
@@ -23,9 +27,10 @@ export class HyperliquidFeed implements PriceFeed {
 
   private async post<T>(body: unknown): Promise<T> {
     let lastError: unknown;
+    const doFetch = this.fetchImpl;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await this.fetchImpl(this.url, {
+        const res = await doFetch(this.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
@@ -41,26 +46,40 @@ export class HyperliquidFeed implements PriceFeed {
     throw new ExchangeError('price_unavailable', `Price source unreachable: ${(lastError as Error).message}`);
   }
 
-  async markets(): Promise<Market[]> {
-    if (this.marketCache && Date.now() - this.marketCache.at < 300_000) return this.marketCache.value;
-    const meta = await this.post<HlMeta>({ type: 'meta' });
-    const value = meta.universe
-      .filter((m) => !m.isDelisted)
-      .map((m) => ({ name: m.name, maxLeverage: m.maxLeverage, sizeDecimals: m.szDecimals }));
-    this.marketCache = { at: Date.now(), value };
+  private async snapshot(): Promise<{ markets: Market[]; stats: Record<string, MarketStats> }> {
+    if (this.ctxCache && Date.now() - this.ctxCache.at < this.midTtlMs) return this.ctxCache.value;
+    const [meta, ctxs] = await this.post<[HlMeta, HlCtx[]]>({ type: 'metaAndAssetCtxs' });
+    const markets: Market[] = [];
+    const stats: Record<string, MarketStats> = {};
+    meta.universe.forEach((u, i) => {
+      const c = ctxs[i];
+      if (!c || u.isDelisted) return;
+      const markPx = Number(c.markPx);
+      if (!(markPx > 0)) return;
+      markets.push({ name: u.name, maxLeverage: u.maxLeverage, sizeDecimals: u.szDecimals });
+      stats[u.name] = {
+        market: u.name, markPx, oraclePx: Number(c.oraclePx), funding: Number(c.funding), premium: Number(c.premium ?? 0),
+        openInterest: Number(c.openInterest), dayNtlVlm: Number(c.dayNtlVlm), prevDayPx: Number(c.prevDayPx), maxLeverage: u.maxLeverage,
+      };
+    });
+    const value = { markets, stats };
+    this.ctxCache = { at: Date.now(), value };
     return value;
   }
 
+  async markets(): Promise<Market[]> { return (await this.snapshot()).markets; }
+
+  async stats(): Promise<Record<string, MarketStats>> { return (await this.snapshot()).stats; }
+
   async mids(): Promise<Record<string, number>> {
-    if (this.midCache && Date.now() - this.midCache.at < this.midTtlMs) return this.midCache.value;
-    const [raw, markets] = await Promise.all([this.post<Record<string, string>>({ type: 'allMids' }), this.markets()]);
-    const value: Record<string, number> = {};
-    for (const m of markets) {
-      const px = Number(raw[m.name]);
-      if (Number.isFinite(px) && px > 0) value[m.name] = px;
-    }
-    this.midCache = { at: Date.now(), value };
-    return value;
+    const { stats } = await this.snapshot();
+    return Object.fromEntries(Object.values(stats).map((s) => [s.market, s.markPx]));
+  }
+
+  async book(market: string): Promise<Book> {
+    const res = await this.post<{ levels: { px: string; sz: string }[][] }>({ type: 'l2Book', coin: market });
+    const side = (l: { px: string; sz: string }[] = []) => l.map((x) => [Number(x.px), Number(x.sz)] as [number, number]);
+    return { bids: side(res.levels[0]), asks: side(res.levels[1]) };
   }
 
   async candles(market: string, interval: string, count: number): Promise<Candle[]> {

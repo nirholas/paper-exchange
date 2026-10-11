@@ -5,11 +5,20 @@
   "license": "Apache-2.0",
   "author": "nirholas",
   "type": "module",
-  "bin": { "paper-exchange": "./dist/cli.js" },
+  "bin": {
+    "paper-exchange": "./dist/cli.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
-  "engines": { "node": ">=22.13" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -17,7 +26,10 @@
     "test:live": "PAPER_LIVE=1 vitest run test/live.test.ts",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "build:site": "esbuild site/src/main.ts --bundle --format=esm --minify --target=es2022 --sourcemap --outfile=site/public/app.js",
+    "dev:site": "npm run build:site && cd site && wrangler pages dev --port 8794",
+    "deploy:site": "npm run build:site && cd site && wrangler pages deploy"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -28,7 +40,19 @@
     "tsup": "^8.5.1",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "lightweight-charts": "^5.2.1",
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.149.0",
+    "playwright-core": "^1.64.0"
   },
-  "keywords": ["mcp", "paper-trading", "ai-agents", "perps", "simulation", "trading", "solana"]
+  "keywords": [
+    "mcp",
+    "paper-trading",
+    "ai-agents",
+    "perps",
+    "simulation",
+    "trading",
+    "solana"
+  ]
 }

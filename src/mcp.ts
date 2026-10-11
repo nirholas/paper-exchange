@@ -48,11 +48,23 @@ export function createMcpServer({ exchange, account, allowSignup }: McpContext):
   const need = (): string => account?.id ?? (() => { throw new ExchangeError('unauthorized', 'This tool needs an account. Call create_account, then reconnect with the returned key as "Authorization: Bearer <key>".'); })();
 
   server.registerTool('list_markets', {
-    description: 'List every tradable perpetual market with its maximum leverage and current price.',
+    description: 'List every tradable perpetual market with price, maximum leverage and, when the feed provides it, hourly funding rate, funding APR, open interest (USD), 24h volume (USD) and 24h change. Longs pay shorts when funding is positive.',
     annotations: readOnly,
   }, () => run(async () => {
-    const [markets, mids] = await Promise.all([exchange.markets(), exchange.feed.mids()]);
-    return markets.filter((m) => mids[m.name]).map((m) => ({ market: m.name, price: mids[m.name], maxLeverage: m.maxLeverage }));
+    const [markets, mids, stats] = await Promise.all([exchange.markets(), exchange.feed.mids(), exchange.feed.stats ? exchange.feed.stats().catch(() => null) : null]);
+    return markets.filter((m) => mids[m.name]).map((m) => {
+      const s = stats?.[m.name];
+      const base = { market: m.name, price: mids[m.name], maxLeverage: m.maxLeverage };
+      if (!s) return base;
+      return {
+        ...base,
+        fundingRateHourly: s.funding,
+        fundingAprPct: Number((s.funding * 24 * 365 * 100).toFixed(2)),
+        openInterestUsd: Math.round(s.openInterest * s.markPx),
+        volume24hUsd: Math.round(s.dayNtlVlm),
+        change24hPct: s.prevDayPx ? Number((((s.markPx - s.prevDayPx) / s.prevDayPx) * 100).toFixed(2)) : null,
+      };
+    });
   }));
 
   server.registerTool('get_price', {

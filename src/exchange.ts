@@ -1,6 +1,6 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { fee, isLiquidated, liquidationPrice, marketFillPrice, roundSize, unrealizedPnl, usd, wouldTriggerStop } from './math.js';
-import { Store } from './store.js';
+import { bookFillPrice, fee, fundingPayment, isLiquidated, liquidationPrice, marketFillPrice, roundSize, unrealizedPnl, usd, wouldTriggerStop } from './math.js';
+import { sha256Hex } from './sha256.js';
+import type { Store } from './store.js';
 import {
   DEFAULT_CONFIG, ExchangeError,
   type Account, type Candle, type Config, type Market, type Order, type OrderType, type Position, type PriceFeed, type Side, type Trade, type TradeKind,
@@ -36,6 +36,8 @@ export interface Quote {
   fee: number;
   liquidationPrice: number | null;
   balanceAfter: number;
+  /** Where the fill price came from. */
+  priceSource: 'order_book' | 'model';
 }
 
 export interface PositionView {
@@ -54,6 +56,10 @@ export interface PositionView {
   stopLoss: number | null;
   takeProfit: number | null;
   openedAt: number;
+  /** Net funding paid since the position opened. Negative means received. */
+  fundingPaid: number;
+  /** Current hourly funding rate for this market, when the feed provides one. */
+  fundingRate: number | null;
 }
 
 export interface AccountView {
@@ -69,6 +75,7 @@ export interface AccountView {
   totalReturnPct: number;
   realizedPnl: number;
   feesPaid: number;
+  fundingPaid: number;
   tradeCount: number;
   liquidations: number;
   positions: PositionView[];
@@ -86,7 +93,7 @@ export interface LeaderboardEntry {
 
 export interface SweepEvent {
   accountId: string;
-  kind: TradeKind | 'limit_fill' | 'order_cancelled';
+  kind: TradeKind | 'limit_fill' | 'order_cancelled' | 'funding';
   market: string;
   detail: string;
 }
@@ -98,7 +105,9 @@ interface Plan extends Quote {
 }
 
 const EPS = 1e-9;
-const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
+const hashKey = (key: string) => sha256Hex(key);
+const uuid = () => globalThis.crypto.randomUUID();
+const newKey = () => `pe_${Array.from(globalThis.crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('')}`;
 const fail = (code: ConstructorParameters<typeof ExchangeError>[0], msg: string): never => {
   throw new ExchangeError(code, msg);
 };
@@ -120,10 +129,10 @@ export class Exchange {
   createAccount(name: string): { account: Account; apiKey: string } {
     const clean = name.trim().slice(0, 40);
     if (!clean) fail('invalid_request', 'name is required');
-    const apiKey = `pe_${randomBytes(32).toString('base64url')}`;
+    const apiKey = newKey();
     const account: Account = {
-      id: randomUUID(), name: clean, balance: this.cfg.startingBalance, startingBalance: this.cfg.startingBalance,
-      realizedPnl: 0, feesPaid: 0, tradeCount: 0, liquidations: 0, createdAt: this.now(),
+      id: uuid(), name: clean, balance: this.cfg.startingBalance, startingBalance: this.cfg.startingBalance,
+      realizedPnl: 0, feesPaid: 0, tradeCount: 0, liquidations: 0, fundingPaid: 0, createdAt: this.now(),
     };
     this.store.insertAccount(account, hashKey(apiKey));
     return { account, apiKey };
@@ -186,7 +195,15 @@ export class Exchange {
     }
     if (!(size > 0)) fail('invalid_request', `sizeUsd is too small for ${market.name}: minimum order is about $${(refPrice * 10 ** -market.sizeDecimals).toFixed(2)}.`);
 
-    const takerPrice = marketFillPrice(mid, req.side, closing, size * mid, this.cfg);
+    const buying = req.side === 'long';
+    let takerPrice = 0;
+    let priceSource: Quote['priceSource'] = 'model';
+    if (this.feed.book) {
+      const book = await this.feed.book(market.name).catch(() => null);
+      const walked = book ? bookFillPrice(buying ? book.asks : book.bids, size) : null;
+      if (walked !== null) { takerPrice = walked; priceSource = 'order_book'; }
+    }
+    if (priceSource === 'model') takerPrice = marketFillPrice(mid, req.side, size * mid, this.cfg);
     const marketable = type === 'market' || (req.side === 'long' ? takerPrice <= req.limitPrice! : takerPrice >= req.limitPrice!);
     const fillPrice = marketable ? takerPrice : req.limitPrice!;
     const notional = usd(size * fillPrice);
@@ -196,10 +213,12 @@ export class Exchange {
 
     let newLiq: number | null = null;
     if (!closing) {
-      const entry = position ? (position.size * position.entryPrice + size * fillPrice) / (position.size + size) : fillPrice;
-      newLiq = liquidationPrice(req.side, entry, leverage, this.cfg.maintenanceMarginRate);
+      const total = (position?.size ?? 0) + size;
+      const entry = position ? (position.size * position.entryPrice + size * fillPrice) / total : fillPrice;
+      newLiq = liquidationPrice(req.side, entry, total, (position?.margin ?? 0) + marginRequired, this.cfg.maintenanceMarginRate);
     } else if (position && size < position.size - EPS) {
-      newLiq = liquidationPrice(position.side, position.entryPrice, position.leverage, this.cfg.maintenanceMarginRate);
+      const left = position.size - size;
+      newLiq = liquidationPrice(position.side, position.entryPrice, left, position.margin * (left / position.size), this.cfg.maintenanceMarginRate);
     }
 
     const reserve = !marketable && !closing ? marginRequired : 0;
@@ -218,7 +237,7 @@ export class Exchange {
     const action = closing ? (position && size >= position.size - EPS ? 'close' : 'reduce') : position ? 'add' : 'open';
     return {
       market: market.name, side: req.side, type, action, rests: !marketable, midPrice: mid, fillPrice, size, notional, leverage,
-      marginRequired, fee: orderFee, liquidationPrice: newLiq, balanceAfter: usd(balanceAfter), closing, position, reserve,
+      marginRequired, fee: orderFee, liquidationPrice: newLiq, balanceAfter: usd(balanceAfter), priceSource: marketable ? priceSource : 'model', closing, position, reserve,
     };
   }
 
@@ -248,7 +267,7 @@ export class Exchange {
         if (this.store.openOrders(accountId).length >= this.cfg.maxOpenOrders) fail('limit_exceeded', `At most ${this.cfg.maxOpenOrders} open orders per account.`);
         if (account.balance + EPS < plan.reserve) fail('insufficient_balance', `Need $${plan.reserve.toFixed(2)} of margin to rest this order, have $${account.balance.toFixed(2)}.`);
         const order: Order = {
-          id: randomUUID(), accountId, market: plan.market, side: plan.side, type: 'limit', size: plan.size, limitPrice: plan.fillPrice,
+          id: uuid(), accountId, market: plan.market, side: plan.side, type: 'limit', size: plan.size, limitPrice: plan.fillPrice,
           leverage: plan.leverage, reduceOnly: !!req.reduceOnly, stopLoss: req.stopLoss ?? null, takeProfit: req.takeProfit ?? null,
           reservedMargin: plan.reserve, status: 'open', createdAt: this.now(),
         };
@@ -318,6 +337,8 @@ export class Exchange {
     const orderFee = fee(notional, liquidity === 'taker' ? this.cfg.takerFeeBps : this.cfg.makerFeeBps);
     let kind: TradeKind;
     let realized: number;
+    let entryPrice = price;
+    let tradeLeverage = leverage;
 
     if (pos && pos.side !== side) {
       if (size > pos.size + EPS) fail('invalid_request', 'Order is larger than the open position. Close it first, then open the other side.');
@@ -327,6 +348,8 @@ export class Exchange {
       const released = full ? pos.margin : pos.margin * (used / pos.size);
       account.balance = usd(account.balance + preReserved + Math.max(0, released + pnl - orderFee));
       realized = usd(pnl - orderFee);
+      entryPrice = pos.entryPrice;
+      tradeLeverage = pos.leverage;
       if (full) this.store.deletePosition(account.id, market);
       else this.store.savePosition({ ...pos, size: pos.size - used, margin: pos.margin - released });
       kind = kindOverride ?? (full ? 'close' : 'reduce');
@@ -342,8 +365,10 @@ export class Exchange {
       this.store.savePosition({
         accountId: account.id, market, side, size: total, entryPrice: entry, margin: (pos?.margin ?? 0) + margin, leverage: lev,
         stopLoss: stopLoss ?? pos?.stopLoss ?? null, takeProfit: takeProfit ?? pos?.takeProfit ?? null, openedAt: pos?.openedAt ?? this.now(),
+        lastFundingAt: pos?.lastFundingAt ?? this.now(), fundingPaid: pos?.fundingPaid ?? 0,
       });
       realized = usd(-orderFee);
+      tradeLeverage = lev;
       kind = pos ? 'add' : 'open';
     }
 
@@ -351,7 +376,7 @@ export class Exchange {
     account.feesPaid = usd(account.feesPaid + orderFee);
     account.tradeCount += 1;
     this.store.saveAccount(account);
-    const trade: Trade = { id: randomUUID(), accountId: account.id, market, side, kind, size, price, fee: orderFee, realizedPnl: realized, liquidity, createdAt: this.now() };
+    const trade: Trade = { id: uuid(), accountId: account.id, market, side, kind, size, price, fee: orderFee, realizedPnl: realized, entryPrice, leverage: tradeLeverage, liquidity, createdAt: this.now() };
     this.store.insertTrade(trade);
     return trade;
   }
@@ -361,7 +386,10 @@ export class Exchange {
   /** Check every position and resting order against live prices. Call on a timer. */
   async sweep(): Promise<SweepEvent[]> {
     const mids = await this.feed.mids();
+    const stats = this.feed.stats ? await this.feed.stats().catch(() => null) : null;
     const events: SweepEvent[] = [];
+
+    if (stats) this.accrueFunding(mids, stats);
 
     for (const p of this.store.allPositions()) {
       const mark = mids[p.market];
@@ -383,8 +411,8 @@ export class Exchange {
             this.store.saveAccount(account);
             this.store.deletePosition(pos.accountId, pos.market);
             this.store.insertTrade({
-              id: randomUUID(), accountId: pos.accountId, market: pos.market, side: pos.side === 'long' ? 'short' : 'long', kind: 'liquidation',
-              size: pos.size, price: mark, fee: liqFee, realizedPnl: usd(proceeds - pos.margin), liquidity: 'taker', createdAt: this.now(),
+              id: uuid(), accountId: pos.accountId, market: pos.market, side: pos.side === 'long' ? 'short' : 'long', kind: 'liquidation',
+              size: pos.size, price: mark, fee: liqFee, realizedPnl: usd(proceeds - pos.margin), entryPrice: pos.entryPrice, leverage: pos.leverage, liquidity: 'taker', createdAt: this.now(),
             });
             events.push({ accountId: pos.accountId, kind: 'liquidation', market: pos.market, detail: `${pos.side} ${pos.market} liquidated at ${mark}` });
             return;
@@ -392,7 +420,7 @@ export class Exchange {
           const trigger = wouldTriggerStop(pos.side, pos.stopLoss, pos.takeProfit, mark);
           if (trigger) {
             const closeSide: Side = pos.side === 'long' ? 'short' : 'long';
-            const px = marketFillPrice(mark, closeSide, true, pos.size * mark, this.cfg);
+            const px = marketFillPrice(mark, closeSide, pos.size * mark, this.cfg);
             this.applyFill(account, pos.market, closeSide, pos.size, px, pos.leverage, 'taker', 0, null, null, trigger);
             events.push({ accountId: pos.accountId, kind: trigger, market: pos.market, detail: `${pos.side} ${pos.market} closed by ${trigger} at ${px}` });
           }
@@ -424,27 +452,49 @@ export class Exchange {
     return events;
   }
 
+  /** Charge or credit funding on every open position since it was last settled. */
+  private accrueFunding(mids: Record<string, number>, stats: Record<string, { funding: number }>) {
+    const now = this.now();
+    for (const p of this.store.allPositions()) {
+      const rate = stats[p.market]?.funding;
+      const mark = mids[p.market];
+      const elapsed = now - p.lastFundingAt;
+      if (rate === undefined || !mark || elapsed < 5_000) continue;
+      this.store.transaction(() => {
+        const pos = this.store.position(p.accountId, p.market);
+        if (!pos) return;
+        const payment = usd(fundingPayment(pos.side, pos.size, mark, rate, now - pos.lastFundingAt));
+        const account = this.requireAccount(pos.accountId);
+        account.fundingPaid = usd(account.fundingPaid + payment);
+        account.realizedPnl = usd(account.realizedPnl - payment);
+        this.store.saveAccount(account);
+        this.store.savePosition({ ...pos, margin: pos.margin - payment, fundingPaid: usd(pos.fundingPaid + payment), lastFundingAt: now });
+      });
+    }
+  }
+
   // ---------- views ----------
 
-  positionView(p: Position, mark: number): PositionView {
+  positionView(p: Position, mark: number, rate?: number): PositionView {
     const pnl = unrealizedPnl(p.side, p.entryPrice, mark, p.size);
-    const liq = liquidationPrice(p.side, p.entryPrice, p.leverage, this.cfg.maintenanceMarginRate);
+    const liq = liquidationPrice(p.side, p.entryPrice, p.size, p.margin, this.cfg.maintenanceMarginRate);
     return {
       market: p.market, side: p.side, size: p.size, entryPrice: p.entryPrice, markPrice: mark, notional: usd(p.size * mark),
       margin: usd(p.margin), leverage: p.leverage, unrealizedPnl: usd(pnl), returnOnMarginPct: usd((pnl / p.margin) * 100),
       liquidationPrice: liq, distanceToLiquidationPct: usd((Math.abs(mark - liq) / mark) * 100),
       stopLoss: p.stopLoss, takeProfit: p.takeProfit, openedAt: p.openedAt,
+      fundingPaid: p.fundingPaid, fundingRate: rate ?? null,
     };
   }
 
   async accountView(accountId: string): Promise<AccountView> {
     const account = this.requireAccount(accountId);
-    const mids = await this.feed.mids();
-    return this.buildView(account, mids);
+    const [mids, stats] = await Promise.all([this.feed.mids(), this.feed.stats ? this.feed.stats().catch(() => null) : null]);
+    return this.buildView(account, mids, stats);
   }
 
-  private buildView(account: Account, mids: Record<string, number>): AccountView {
-    const positions = this.store.positions(account.id).map((p) => this.positionView(p, mids[p.market] ?? p.entryPrice));
+  private buildView(account: Account, mids: Record<string, number>, stats: Record<string, { funding: number }> | null = null): AccountView {
+    const positions = this.store.positions(account.id).map((p) => this.positionView(p, mids[p.market] ?? p.entryPrice, stats?.[p.market]?.funding));
     const openOrders = this.store.openOrders(account.id);
     const margin = positions.reduce((s, p) => s + p.margin, 0);
     const upnl = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
@@ -454,7 +504,7 @@ export class Exchange {
       id: account.id, name: account.name, available: usd(account.balance), marginInPositions: usd(margin), reservedInOrders: usd(reserved),
       unrealizedPnl: usd(upnl), equity, startingBalance: account.startingBalance,
       totalReturnPct: usd(((equity - account.startingBalance) / account.startingBalance) * 100),
-      realizedPnl: account.realizedPnl, feesPaid: account.feesPaid, tradeCount: account.tradeCount, liquidations: account.liquidations,
+      realizedPnl: account.realizedPnl, feesPaid: account.feesPaid, fundingPaid: account.fundingPaid, tradeCount: account.tradeCount, liquidations: account.liquidations,
       positions, openOrders,
     };
   }

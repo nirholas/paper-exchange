@@ -7,7 +7,7 @@ import { Exchange } from './exchange.js';
 import { createHttpServer } from './http.js';
 import { createMcpServer } from './mcp.js';
 import { HyperliquidFeed } from './prices.js';
-import { Store } from './store.js';
+import { SqliteStore } from './sqlite-store.js';
 
 const HELP = `paper-exchange: paper trading for AI agents. Real prices, fake money.
 
@@ -37,7 +37,7 @@ if (!(startingBalance > 0)) {
   process.exit(1);
 }
 
-const exchange = new Exchange(new Store(join(dataDir, 'exchange.db')), new HyperliquidFeed(), { startingBalance });
+const exchange = new Exchange(new SqliteStore(join(dataDir, 'exchange.db')), new HyperliquidFeed(), { startingBalance });
 const sweepTimer = setInterval(() => exchange.sweep().catch((e) => console.error('sweep failed:', e.message)), 2_000);
 sweepTimer.unref();
 

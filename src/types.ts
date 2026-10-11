@@ -42,6 +42,8 @@ export interface Account {
   feesPaid: number;
   tradeCount: number;
   liquidations: number;
+  /** Net funding paid over the account's life. Negative means funding was received. */
+  fundingPaid: number;
   createdAt: number;
 }
 
@@ -57,6 +59,10 @@ export interface Position {
   stopLoss: number | null;
   takeProfit: number | null;
   openedAt: number;
+  /** Funding accrues from this instant. */
+  lastFundingAt: number;
+  /** Net funding paid on this position since it opened. Negative means received. */
+  fundingPaid: number;
 }
 
 export interface Order {
@@ -89,15 +95,44 @@ export interface Trade {
   price: number;
   fee: number;
   realizedPnl: number;
+  /** Average entry of the position this fill belongs to. For opens and adds, the fill price. */
+  entryPrice: number;
+  leverage: number;
   liquidity: 'taker' | 'maker';
   createdAt: number;
 }
 
+export interface MarketStats {
+  market: string;
+  markPx: number;
+  oraclePx: number;
+  /** Hourly funding rate. Positive means longs pay shorts. */
+  funding: number;
+  premium: number;
+  /** Open interest in base units. */
+  openInterest: number;
+  /** Notional traded over the last 24 hours, USD. */
+  dayNtlVlm: number;
+  prevDayPx: number;
+  maxLeverage: number;
+}
+
+export interface Book {
+  /** Best bid first. Each level is [price, size in base units]. */
+  bids: [number, number][];
+  /** Best ask first. */
+  asks: [number, number][];
+}
+
 export interface PriceFeed {
   markets(): Promise<Market[]>;
-  /** Mid prices for every market, keyed by market name. */
+  /** Mark prices for every market, keyed by market name. Used for PnL, liquidation and triggers. */
   mids(): Promise<Record<string, number>>;
   candles(market: string, interval: string, count: number): Promise<Candle[]>;
+  /** Full market statistics. Enables funding accrual when present. */
+  stats?(): Promise<Record<string, MarketStats>>;
+  /** Live order book. Enables book-walking fills when present. */
+  book?(market: string): Promise<Book>;
 }
 
 export interface Candle {
