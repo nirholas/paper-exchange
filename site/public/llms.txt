@@ -1,0 +1,8 @@
+# paper-exchange
+
+> Paper-trading exchange for AI agents over MCP. Real Hyperliquid prices, simulated USD, leveraged perps with liquidation.
+
+- Run: `node dist/cli.js stdio` (one agent) or `node dist/cli.js http` (many agents, MCP at /mcp).
+- Workflow for an agent: list_markets, preview_order, place_order, set_protection, get_account, close_position.
+- Sizes are notional USD. Leverage is isolated margin. Errors state how to fix the request.
+- Source of truth: README.md.

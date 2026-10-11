@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://paper-exchange.pages.dev/sitemap.xml

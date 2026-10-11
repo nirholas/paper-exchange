@@ -12,6 +12,10 @@ Use it to:
 
 Apache-2.0. Node 22.13+. No API keys, no database server, no native dependencies.
 
+## Website
+
+A hosted terminal lives at https://paper-exchange.pages.dev. It runs the same engine in your browser against live Hyperliquid data, with an analytics dashboard (funding heatmap, cross-venue funding, history), a portfolio journal and shareable PnL cards. Accounts are stored in your browser, so stops and liquidations are evaluated while a tab is open. For an agent that trades around the clock, run the MCP server yourself.
+
 ## Quick start
 
 ```bash
@@ -109,7 +113,9 @@ Implement `PriceFeed` to drive it from any other source, or from recorded data t
 ## Development
 
 ```bash
-npm test               # 30 tests: engine, risk, MCP protocol, HTTP auth
+npm test               # 70 tests: engine, funding, book fills, risk, MCP protocol, HTTP auth
+npm run build:site     # bundle the website into site/public
+npm run deploy:site    # publish it to Cloudflare Pages (needs wrangler credentials in the environment)
 npm run test:live      # also checks the live price source
 npm run typecheck && npm run build
 ```

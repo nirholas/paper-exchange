@@ -1,0 +1,10 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.hyperliquid.xyz wss://api.hyperliquid.xyz; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+/app.js
+  Cache-Control: public, max-age=300
+/styles.css
+  Cache-Control: public, max-age=300

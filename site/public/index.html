@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Paper Exchange | Paper trade crypto perps on live Hyperliquid data</title>
+<meta name="description" content="Trade perpetual futures with $10,000 of simulated money against live Hyperliquid prices, funding and order books. Funding heatmaps, PnL cards, and an MCP server so AI agents can paper trade too.">
+<meta name="theme-color" content="#0b1418">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://paper-exchange.pages.dev/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Paper Exchange">
+<meta property="og:description" content="Paper trade crypto perps on live Hyperliquid prices, funding and order books. Humans and AI agents welcome.">
+<meta property="og:url" content="https://paper-exchange.pages.dev/">
+<meta property="og:image" content="https://paper-exchange.pages.dev/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://paper-exchange.pages.dev/og.png">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Paper Exchange","applicationCategory":"FinanceApplication","operatingSystem":"Any","description":"Paper trading simulator for crypto perpetual futures using live Hyperliquid market data, with an MCP server for AI agents.","url":"https://paper-exchange.pages.dev/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://www.apache.org/licenses/LICENSE-2.0"}</script>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+<header class="top">
+  <a class="brand" href="#/trade" aria-label="Paper Exchange home"><svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0b1418"/><path d="M8 22 14 14l4 4 6-9" fill="none" stroke="#50d2c1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Paper Exchange</span></a>
+  <nav id="nav" aria-label="Main"><a href="#/trade">Trade</a><a href="#/markets">Markets</a><a href="#/portfolio">Portfolio</a><a href="#/cards">PnL cards</a><a href="#/agents">AI agents</a></nav>
+  <div class="top-right">
+    <span class="feed"><i id="hdr-feed" class="dot down"></i><span id="hdr-feed-label">Connecting</span></span>
+    <span class="eq"><label>Paper equity</label><b id="hdr-equity">$10,000.00</b></span>
+    <button class="btn sm" id="reset" title="Reset to $10,000">Reset</button>
+    <button class="btn sm menu" id="menu" aria-label="Menu">Menu</button>
+  </div>
+</header>
+<div class="banner">Simulated funds. Live Hyperliquid prices. Nothing here moves real money.</div>
+<main id="view" tabindex="-1"></main>
+<footer class="foot"><span>Paper Exchange is open source under Apache-2.0. Not affiliated with Hyperliquid. Market data from the public Hyperliquid API.</span><span><a href="https://github.com/nirholas/paper-exchange" target="_blank" rel="noopener noreferrer">GitHub</a> <a href="/llms.txt">llms.txt</a></span></footer>
+<div id="toasts" aria-live="polite"></div>
+<noscript><p style="padding:24px">Paper Exchange needs JavaScript to run the trading terminal.</p></noscript>
+<script src="/app.js" type="module"></script>
+</body>
+</html>
