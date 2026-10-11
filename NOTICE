@@ -1,0 +1,5 @@
+paper-exchange
+Copyright 2026 nirholas
+
+Licensed under the Apache License, Version 2.0.
+Market data is read from Hyperliquid's public info API. This project is not affiliated with Hyperliquid.
