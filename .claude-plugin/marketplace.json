@@ -7,8 +7,9 @@
   "plugins": [
     {
       "name": "paper-exchange",
-      "source": "./",
+      "source": "./plugins/paper-exchange",
       "description": "Paper-trade perpetuals over MCP with live Hyperliquid prices and simulated money: leverage, stops, liquidation, leaderboard.",
+      "category": "development",
       "tags": [
         "mcp",
         "paper-trading",
