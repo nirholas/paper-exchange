@@ -1,0 +1,17 @@
+{
+  "name": "paper-exchange",
+  "version": "0.1.0",
+  "description": "Paper-trade perpetuals over MCP with live Hyperliquid prices and simulated money: leverage, stops, liquidation, leaderboard.",
+  "author": {
+    "name": "nirholas"
+  },
+  "repository": "https://github.com/nirholas/paper-exchange",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "paper-trading",
+    "perps",
+    "ai-agents",
+    "simulation"
+  ]
+}

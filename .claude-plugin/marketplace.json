@@ -1,0 +1,20 @@
+{
+  "name": "paper-exchange",
+  "owner": {
+    "name": "nirholas"
+  },
+  "description": "Paper-trade perpetuals over MCP with live Hyperliquid prices and simulated money: leverage, stops, liquidation, leaderboard.",
+  "plugins": [
+    {
+      "name": "paper-exchange",
+      "source": "./",
+      "description": "Paper-trade perpetuals over MCP with live Hyperliquid prices and simulated money: leverage, stops, liquidation, leaderboard.",
+      "tags": [
+        "mcp",
+        "paper-trading",
+        "perps",
+        "trading"
+      ]
+    }
+  ]
+}
